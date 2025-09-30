@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live MD Demo (OpenMM → MDsrv → Mol*)</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0b1220; color: #e6edf7; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    header { padding: 12px 16px; border-bottom: 1px solid #243042; display: flex; align-items: center; gap: 16px; }
+    main { height: calc(100% - 54px); display: grid; grid-template-columns: 1fr 320px; }
+    #viewer { width: 100%; height: 100%; }
+    #sidebar { padding: 12px; border-left: 1px solid #243042; overflow: auto; }
+    button { background: #243042; color: #e6edf7; border: none; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+    input[type=number] { width: 80px; }
+    a { color: #9cdcfe; }
+    code { background: #0f172a; padding: 2px 6px; border-radius: 6px; }
+  </style>
+  <!-- Mol* from CDN -->
+  <script src="https://unpkg.com/molstar/build/viewer/molstar.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/molstar/build/viewer/molstar.css" />
+</head>
+<body>
+  <header>
+    <strong>Live MD Demo</strong>
+    <span>OpenMM → MDsrv → Mol*</span>
+    <span id="status">loading…</span>
+  </header>
+  <main>
+    <div id="viewer"></div>
+    <div id="sidebar">
+      <h3>Controls</h3>
+      <p>This page polls for new frames by re-requesting the trajectory when file grows. For true frame-accurate streaming and on-the-fly alignment, MDsrv endpoints can be queried; this demo keeps it very simple.</p>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <button id="reload">Reload Trajectory</button>
+        <button id="playpause">Play/Pause</button>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <label>Poll (s) <input id="pollSecs" type="number" value="5" min="1" /></label>
+        <button id="togglePoll">Start Polling</button>
+      </div>
+      <p>MDsrv URL: <code id="mdsrv-url"></code></p>
+      <p>Files: <code id="files"></code></p>
+      <p>Tips: For long-running sims, rotate files (e.g., <code>traj_00.dcd</code>, <code>traj_01.dcd</code>) and update this page to pick the newest.</p>
+      <hr />
+      <p><small>Made for you ♥ — this is a minimal reference; customize freely.</small></p>
+    </div>
+  </main>
+  <script type="module">
+    const statusEl = document.getElementById('status')
+    const mdsrvEl = document.getElementById('mdsrv-url')
+    const filesEl = document.getElementById('files')
+    const reloadBtn = document.getElementById('reload')
+    const playPauseBtn = document.getElementById('playpause')
+    const pollSecsInput = document.getElementById('pollSecs')
+    const togglePollBtn = document.getElementById('togglePoll')
+
+    let polling = false
+    let pollTimer = null
+    let currentBytes = 0
+    let playing = true
+
+    const viewer = new molstar.Viewer('viewer', {
+      layoutIsExpanded: true,
+      layoutShowControls: true,
+      layoutShowRemoteState: false,
+      layoutShowSequence: true,
+      layoutShowLog: false,
+      layoutShowLeftPanel: false,
+      viewportShowExpand: true,
+      backgroundColor: { r: 11, g: 18, b: 32 }
+    })
+
+    async function getConfig() {
+      const res = await fetch('/api/config')
+      if (!res.ok) throw new Error('Config fetch failed')
+      return await res.json()
+    }
+
+    async function headSize(url) {
+      // HEAD to get Content-Length (works with Express static / MDsrv / typical web servers)
+      const res = await fetch(url, { method: 'HEAD' })
+      if (!res.ok) return 0
+      const len = res.headers.get('content-length')
+      return len ? Number(len) : 0
+    }
+
+    let loaded = false
+    let cfg = null
+
+    async function loadAll() {
+      cfg = await getConfig()
+      const base = cfg.mdsrvUrl.replace(/\/$/, '')
+      const pdbUrl = base + '/data/' + cfg.topology
+      const dcdUrl = base + '/data/' + cfg.trajectory
+      mdsrvEl.textContent = base
+      filesEl.textContent = cfg.topology + ' + ' + cfg.trajectory
+
+      statusEl.textContent = 'loading structure…'
+      await viewer.loadStructureFromUrl(pdbUrl, 'pdb')
+      statusEl.textContent = 'loading trajectory…'
+      // Mol* DCD support via trajectory source; provide model and then attach trajectory
+      const struct = viewer.plugin.managers.structure.hierarchy.selection.structures[0]?.cell?.obj?.data
+      if (!struct) throw new Error('No structure loaded')
+
+      await viewer.loadTrajectory({
+        kind: 'url',
+        url: dcdUrl,
+        format: 'dcd',
+        model: struct.models[0]
+      })
+
+      statusEl.textContent = 'ready'
+      loaded = true
+      if (playing) viewer.plugin.managers.animation.play()
+      currentBytes = await headSize(dcdUrl)
+    }
+
+    async function maybeReloadOnGrowth() {
+      if (!cfg) return
+      const base = cfg.mdsrvUrl.replace(/\/$/, '')
+      const dcdUrl = base + '/data/' + cfg.trajectory
+      const size = await headSize(dcdUrl)
+      if (size > currentBytes) {
+        currentBytes = size
+        // naive approach: re-attach trajectory (Mol* will reset the time)
+        statusEl.textContent = 'trajectory grew, reloading…'
+        const struct = viewer.plugin.managers.structure.hierarchy.selection.structures[0]?.cell?.obj?.data
+        await viewer.loadTrajectory({
+          kind: 'url',
+          url: dcdUrl + '?t=' + Date.now(),
+          format: 'dcd',
+          model: struct.models[0]
+        })
+        statusEl.textContent = 'ready'
+      }
+    }
+
+    reloadBtn.onclick = async () => {
+      await maybeReloadOnGrowth()
+    }
+
+    playPauseBtn.onclick = () => {
+      playing = !playing
+      if (playing) viewer.plugin.managers.animation.play()
+      else viewer.plugin.managers.animation.pause()
+    }
+
+    togglePollBtn.onclick = () => {
+      polling = !polling
+      togglePollBtn.textContent = polling ? 'Stop Polling' : 'Start Polling'
+      if (polling) {
+        const secs = Math.max(1, Number(pollSecsInput.value) || 5)
+        pollTimer = setInterval(maybeReloadOnGrowth, secs * 1000)
+      } else if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }
+
+    loadAll().catch(err => {
+      console.error(err)
+      statusEl.textContent = 'error: ' + err.message
+    })
+  </script>
+</body>
+</html>
