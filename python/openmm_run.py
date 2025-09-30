@@ -21,34 +21,16 @@ TOPOLOGY_PATH = os.path.join(DATA_DIR, "topology.pdb")
 TRAJ_PATH = os.path.join(DATA_DIR, "traj.dcd")
 
 # --- Minimal alanine dipeptide in implicit solvent ---
-from simtk.openmm import app
-import simtk.openmm as mm
-from simtk import unit
+from openmm import app
+import openmm as mm
+from openmm import unit
 
-# Build alanine dipeptide from PDB (built-in example via modeller)
-# We'll create a simple peptide (Ace-Ala-Nme) by loading a known PDB-like string
-ala2 = \"\"\"\
-ATOM      1  N   ALA A   1      -1.207   1.207   0.000  1.00  0.00           N
-ATOM      2  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C
-ATOM      3  C   ALA A   1       1.207   0.000   1.207  1.00  0.00           C
-ATOM      4  O   ALA A   1       2.121  -0.828   1.207  1.00  0.00           O
-ATOM      5  CB  ALA A   1       0.000   0.000  -1.540  1.00  0.00           C
-ATOM      6  H   ALA A   1      -1.540   2.070   0.000  1.00  0.00           H
-ATOM      7  HA  ALA A   1       0.000  -0.945   0.540  1.00  0.00           H
-ATOM      8  HB1 ALA A   1       0.945   0.540  -2.070  1.00  0.00           H
-ATOM      9  HB2 ALA A   1      -0.945   0.540  -2.070  1.00  0.00           H
-ATOM     10  HB3 ALA A   1       0.000  -0.945  -2.080  1.00  0.00           H
-TER
-END
-\"\"\"
-
-from io import StringIO
-pdb = app.PDBFile(StringIO(ala2))
-
-# Force field & system
-ff = app.ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')
-# We'll do an implicit-like setup by not adding solvent; keep it simple
-system = ff.createSystem(pdb.topology, nonbondedMethod=app.NoCutoff, constraints=app.HBonds)
+# Use OpenMM's built-in alanine dipeptide test system
+from openmmtools import testsystems
+test_system = testsystems.AlanineDipeptideImplicit()
+system = test_system.system
+pdb = test_system.topology
+positions = test_system.positions
 
 # Integrator
 temperature = 300 * unit.kelvin
@@ -58,8 +40,8 @@ integrator = mm.LangevinIntegrator(temperature, friction, timestep)
 
 # Context
 platform = mm.Platform.getPlatformByName('CPU')
-simulation = app.Simulation(pdb.topology, system, integrator, platform)
-simulation.context.setPositions(pdb.positions)
+simulation = app.Simulation(pdb, system, integrator, platform)
+simulation.context.setPositions(positions)
 
 # Minimize & write initial PDB
 simulation.minimizeEnergy()
