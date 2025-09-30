@@ -31,7 +31,7 @@
       <h3>Controls</h3>
       <p>CPK sphere representation. Mouse: rotate (left), pan (right), zoom (wheel).</p>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <button id="playpause">Play/Pause</button>
+        <button id="playpause">Pause</button>
       </div>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
         <label>Poll (s) <input id="pollSecs" type="number" value="5" min="1" /></label>
@@ -54,7 +54,7 @@
     let polling = false
     let pollTimer = null
     let currentBytes = 0
-    let playing = false
+    let playing = true
     let currentFrame = 0
     let frames = []
     let atoms = []
@@ -115,27 +115,37 @@
         const view = new DataView(arrayBuffer)
         let offset = 0
 
-        // Read header
-        offset += 4 // skip first block size
-        const magic = String.fromCharCode(view.getUint8(offset), view.getUint8(offset+1), view.getUint8(offset+2), view.getUint8(offset+3))
-        offset += 4
+        // First block: main header
+        console.log('Parsing header at offset:', offset, 'bufferSize:', arrayBuffer.byteLength)
+        const hdrSize = view.getInt32(offset, true); offset += 4
+        console.log('hdrSize:', hdrSize, 'offset:', offset)
+
+        // Read the block content (hdrSize bytes)
+        const magic = new TextDecoder('ascii').decode(new Uint8Array(arrayBuffer, offset, 4)); offset += 4
+        console.log('magic:', magic, 'offset:', offset)
         const nFrames = view.getInt32(offset, true); offset += 4
-        offset += 4 // first step
-        const nStep = view.getInt32(offset, true); offset += 4
-        offset += 20 // skip unused fields
+        console.log('nFrames:', nFrames, 'offset:', offset)
+
+        // Skip to the end of this block
+        offset = 4 + hdrSize  // Jump to end marker position
+        console.log('Jumping to end of header block at offset:', offset)
+        const hdrEnd = view.getInt32(offset, true); offset += 4  // Should match hdrSize
+        console.log('hdrEnd:', hdrEnd, 'should match hdrSize:', hdrSize, 'offset:', offset)
+
+        // Second block: title (skip entire block using titleSize)
+        console.log('Reading title at offset:', offset)
+        const titleSize = view.getInt32(offset, true); offset += 4
+        console.log('titleSize:', titleSize, 'offset:', offset)
+        offset += titleSize  // Skip entire title block content
+        const titleEnd = view.getInt32(offset, true); offset += 4
+        console.log('titleEnd:', titleEnd, 'should match titleSize:', titleSize, 'offset:', offset)
+
+        // Third block: natoms
+        const natSize = view.getInt32(offset, true); offset += 4  // Should be 4
         const nAtoms = view.getInt32(offset, true); offset += 4
-        offset += 4 // skip block size
+        const natEnd = view.getInt32(offset, true); offset += 4
 
-        console.log('DCD header:', { magic, nFrames, nAtoms })
-
-        // Skip title block
-        offset += 4 // block size
-        const nTitle = view.getInt32(offset, true); offset += 4
-        offset += nTitle * 80 // skip titles
-        offset += 4 // block size
-
-        // Skip additional header
-        offset += 8 // block sizes
+        console.log('DCD header:', { magic, nFrames, nAtoms, hdrSize, natSize, offset })
 
         // Read frames
         const parsedFrames = []
@@ -206,9 +216,17 @@
 
     // Update atom positions for current frame
     function updateFrame() {
-      if (frames.length === 0) return
+      if (frames.length === 0) {
+        console.log('updateFrame: no frames')
+        return
+      }
 
       const frame = frames[currentFrame]
+      if (!frame) {
+        console.log('updateFrame: frame', currentFrame, 'is undefined')
+        return
+      }
+
       for (let i = 0; i < atomSpheres.length && i < frame.x.length; i++) {
         atomSpheres[i].position.x = frame.x[i]
         atomSpheres[i].position.y = frame.y[i]
@@ -219,10 +237,20 @@
     }
 
     // Animation loop
+    let animateStarted = false
+    let frameCounter = 0
     function animate() {
+      if (!animateStarted) {
+        console.log('Animation loop started, playing:', playing, 'frames:', frames.length)
+        animateStarted = true
+      }
       if (playing && frames.length > 0) {
         currentFrame = (currentFrame + 1) % frames.length
         updateFrame()
+        frameCounter++
+        if (frameCounter % 100 === 0) {
+          console.log('Animation frame:', currentFrame, 'counter:', frameCounter)
+        }
       }
       setTimeout(animate, 50) // 20 fps
     }
@@ -260,6 +288,13 @@
       console.log('DCD buffer size:', dcdBuffer.byteLength)
       frames = parseDCD(dcdBuffer)
       console.log('Loaded frames:', frames.length)
+
+      // Check if frames differ
+      if (frames.length > 1) {
+        console.log('Frame 0, atom 0:', frames[0].x[0], frames[0].y[0], frames[0].z[0])
+        console.log('Frame 1, atom 0:', frames[1].x[0], frames[1].y[0], frames[1].z[0])
+        console.log('Frame 100, atom 0:', frames[100].x[0], frames[100].y[0], frames[100].z[0])
+      }
 
       if (frames.length > 0) {
         currentFrame = 0
