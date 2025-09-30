@@ -239,20 +239,30 @@
     // Animation loop
     let animateStarted = false
     let frameCounter = 0
-    function animate() {
+    let lastFrameTime = 0
+    const frameInterval = 50 // 20 fps (50ms between frames)
+
+    function animate(timestamp) {
       if (!animateStarted) {
         console.log('Animation loop started, playing:', playing, 'frames:', frames.length)
         animateStarted = true
+        lastFrameTime = timestamp
       }
-      if (playing && frames.length > 0) {
-        currentFrame = (currentFrame + 1) % frames.length
-        updateFrame()
-        frameCounter++
-        if (frameCounter % 100 === 0) {
-          console.log('Animation frame:', currentFrame, 'counter:', frameCounter)
+
+      // Update at ~20fps regardless of render rate
+      if (timestamp - lastFrameTime >= frameInterval) {
+        if (playing && frames.length > 0) {
+          currentFrame = (currentFrame + 1) % frames.length
+          updateFrame()
+          frameCounter++
+          if (frameCounter % 100 === 0) {
+            console.log('Animation frame:', currentFrame, 'counter:', frameCounter)
+          }
         }
+        lastFrameTime = timestamp
       }
-      setTimeout(animate, 50) // 20 fps
+
+      requestAnimationFrame(animate)
     }
 
     async function getConfig() {
@@ -303,7 +313,7 @@
 
       currentBytes = await headSize(dcdUrl)
       statusEl.textContent = 'ready'
-      animate()
+      requestAnimationFrame(animate)
     }
 
     async function checkForNewFrames() {
