@@ -3,53 +3,50 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Live MD Demo (OpenMM → MDsrv → Mol*)</title>
+  <title>Live MD Demo (OpenMM → Babylon.js CPK Viewer)</title>
   <style>
     html, body { height: 100%; margin: 0; background: #0b1220; color: #e6edf7; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     header { padding: 12px 16px; border-bottom: 1px solid #243042; display: flex; align-items: center; gap: 16px; }
     main { height: calc(100% - 54px); display: grid; grid-template-columns: 1fr 320px; }
-    #viewer { width: 100%; height: 100%; }
+    #viewer { width: 100%; height: 100%; touch-action: none; }
     #sidebar { padding: 12px; border-left: 1px solid #243042; overflow: auto; }
     button { background: #243042; color: #e6edf7; border: none; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
-    input[type=number] { width: 80px; }
+    button:hover { background: #2d3b50; }
+    input[type=number] { width: 80px; background: #0f172a; color: #e6edf7; border: 1px solid #243042; padding: 4px; border-radius: 4px; }
     a { color: #9cdcfe; }
     code { background: #0f172a; padding: 2px 6px; border-radius: 6px; }
   </style>
-  <!-- Mol* from CDN -->
-  <script src="https://unpkg.com/molstar/build/viewer/molstar.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/molstar/build/viewer/molstar.css" />
+  <!-- Babylon.js from CDN -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
   <header>
     <strong>Live MD Demo</strong>
-    <span>OpenMM → MDsrv → Mol*</span>
+    <span>OpenMM → Babylon.js CPK Viewer</span>
     <span id="status">loading…</span>
   </header>
   <main>
-    <div id="viewer"></div>
+    <canvas id="viewer"></canvas>
     <div id="sidebar">
       <h3>Controls</h3>
-      <p>This page polls for new frames by re-requesting the trajectory when file grows. For true frame-accurate streaming and on-the-fly alignment, MDsrv endpoints can be queried; this demo keeps it very simple.</p>
+      <p>CPK sphere representation. Mouse: rotate (left), pan (right), zoom (wheel).</p>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <button id="reload">Reload Trajectory</button>
         <button id="playpause">Play/Pause</button>
       </div>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
         <label>Poll (s) <input id="pollSecs" type="number" value="5" min="1" /></label>
         <button id="togglePoll">Start Polling</button>
       </div>
-      <p>MDsrv URL: <code id="mdsrv-url"></code></p>
-      <p>Files: <code id="files"></code></p>
-      <p>Tips: For long-running sims, rotate files (e.g., <code>traj_00.dcd</code>, <code>traj_01.dcd</code>) and update this page to pick the newest.</p>
+      <p>Frame: <code id="frame-info">0/0</code></p>
+      <p>Atoms: <code id="atom-count">0</code></p>
       <hr />
-      <p><small>Made for you ♥ — this is a minimal reference; customize freely.</small></p>
+      <p><small>Live trajectory streaming with Babylon.js</small></p>
     </div>
   </main>
   <script type="module">
     const statusEl = document.getElementById('status')
-    const mdsrvEl = document.getElementById('mdsrv-url')
-    const filesEl = document.getElementById('files')
-    const reloadBtn = document.getElementById('reload')
+    const frameInfoEl = document.getElementById('frame-info')
+    const atomCountEl = document.getElementById('atom-count')
     const playPauseBtn = document.getElementById('playpause')
     const pollSecsInput = document.getElementById('pollSecs')
     const togglePollBtn = document.getElementById('togglePoll')
@@ -57,21 +54,177 @@
     let polling = false
     let pollTimer = null
     let currentBytes = 0
-    let playing = true
+    let playing = false
+    let currentFrame = 0
+    let frames = []
+    let atoms = []
+    let atomSpheres = []
 
-    let viewer = null
+    // CPK colors (RGB 0-1)
+    const CPK_COLORS = {
+      'H': [1.0, 1.0, 1.0],    // white
+      'C': [0.5, 0.5, 0.5],    // gray
+      'N': [0.2, 0.2, 1.0],    // blue
+      'O': [1.0, 0.2, 0.2],    // red
+      'S': [1.0, 1.0, 0.0],    // yellow
+      'P': [1.0, 0.5, 0.0],    // orange
+    }
 
-    async function initViewer() {
-      viewer = await molstar.Viewer.create('viewer', {
-        layoutIsExpanded: true,
-        layoutShowControls: true,
-        layoutShowRemoteState: false,
-        layoutShowSequence: true,
-        layoutShowLog: false,
-        layoutShowLeftPanel: false,
-        viewportShowExpand: true,
-        backgroundColor: { r: 11, g: 18, b: 32 }
-      })
+    // CPK radii in angstroms
+    const CPK_RADII = {
+      'H': 0.25, 'C': 0.7, 'N': 0.65, 'O': 0.6, 'S': 1.0, 'P': 1.0
+    }
+
+    // Babylon.js setup
+    const canvas = document.getElementById('viewer')
+    const engine = new BABYLON.Engine(canvas, true)
+    const scene = new BABYLON.Scene(engine)
+    scene.clearColor = new BABYLON.Color3(0.043, 0.071, 0.125)
+
+    const camera = new BABYLON.ArcRotateCamera('camera', 0, Math.PI / 3, 30, BABYLON.Vector3.Zero(), scene)
+    camera.attachControl(canvas, true)
+    camera.wheelPrecision = 50
+    camera.lowerRadiusLimit = 5
+    camera.upperRadiusLimit = 100
+
+    const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene)
+    light.intensity = 0.8
+
+    engine.runRenderLoop(() => scene.render())
+    window.addEventListener('resize', () => engine.resize())
+
+    // Parse PDB file
+    function parsePDB(text) {
+      const lines = text.split('\n')
+      const parsedAtoms = []
+      for (const line of lines) {
+        if (line.startsWith('ATOM') || line.startsWith('HETATM')) {
+          const element = line.substring(76, 78).trim() || line.substring(12, 14).trim().charAt(0)
+          const x = parseFloat(line.substring(30, 38))
+          const y = parseFloat(line.substring(38, 46))
+          const z = parseFloat(line.substring(46, 54))
+          parsedAtoms.push({ element, x, y, z })
+        }
+      }
+      return parsedAtoms
+    }
+
+    // Parse DCD binary file
+    function parseDCD(arrayBuffer) {
+      try {
+        const view = new DataView(arrayBuffer)
+        let offset = 0
+
+        // Read header
+        offset += 4 // skip first block size
+        const magic = String.fromCharCode(view.getUint8(offset), view.getUint8(offset+1), view.getUint8(offset+2), view.getUint8(offset+3))
+        offset += 4
+        const nFrames = view.getInt32(offset, true); offset += 4
+        offset += 4 // first step
+        const nStep = view.getInt32(offset, true); offset += 4
+        offset += 20 // skip unused fields
+        const nAtoms = view.getInt32(offset, true); offset += 4
+        offset += 4 // skip block size
+
+        console.log('DCD header:', { magic, nFrames, nAtoms })
+
+        // Skip title block
+        offset += 4 // block size
+        const nTitle = view.getInt32(offset, true); offset += 4
+        offset += nTitle * 80 // skip titles
+        offset += 4 // block size
+
+        // Skip additional header
+        offset += 8 // block sizes
+
+        // Read frames
+        const parsedFrames = []
+        for (let f = 0; f < nFrames; f++) {
+          const coords = { x: [], y: [], z: [] }
+
+          // X coordinates
+          offset += 4 // block size
+          for (let i = 0; i < nAtoms; i++) {
+            coords.x.push(view.getFloat32(offset, true))
+            offset += 4
+          }
+          offset += 4 // block size
+
+          // Y coordinates
+          offset += 4
+          for (let i = 0; i < nAtoms; i++) {
+            coords.y.push(view.getFloat32(offset, true))
+            offset += 4
+          }
+          offset += 4
+
+          // Z coordinates
+          offset += 4
+          for (let i = 0; i < nAtoms; i++) {
+            coords.z.push(view.getFloat32(offset, true))
+            offset += 4
+          }
+          offset += 4
+
+          parsedFrames.push(coords)
+        }
+
+        console.log('Parsed frames:', parsedFrames.length)
+        return parsedFrames
+      } catch (err) {
+        console.error('DCD parse error:', err)
+        return []
+      }
+    }
+
+    // Create atom spheres
+    function createAtoms() {
+      atomSpheres.forEach(s => s.dispose())
+      atomSpheres = []
+
+      for (let i = 0; i < atoms.length; i++) {
+        const atom = atoms[i]
+        const element = atom.element
+        const radius = CPK_RADII[element] || 0.7
+        const color = CPK_COLORS[element] || [0.8, 0.8, 0.8]
+
+        const sphere = BABYLON.MeshBuilder.CreateSphere(`atom${i}`, { diameter: radius * 2, segments: 12 }, scene)
+        const material = new BABYLON.StandardMaterial(`mat${i}`, scene)
+        material.diffuseColor = new BABYLON.Color3(...color)
+        material.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3)
+        sphere.material = material
+
+        sphere.position.x = atom.x
+        sphere.position.y = atom.y
+        sphere.position.z = atom.z
+
+        atomSpheres.push(sphere)
+      }
+
+      atomCountEl.textContent = atoms.length
+    }
+
+    // Update atom positions for current frame
+    function updateFrame() {
+      if (frames.length === 0) return
+
+      const frame = frames[currentFrame]
+      for (let i = 0; i < atomSpheres.length && i < frame.x.length; i++) {
+        atomSpheres[i].position.x = frame.x[i]
+        atomSpheres[i].position.y = frame.y[i]
+        atomSpheres[i].position.z = frame.z[i]
+      }
+
+      frameInfoEl.textContent = `${currentFrame + 1}/${frames.length}`
+    }
+
+    // Animation loop
+    function animate() {
+      if (playing && frames.length > 0) {
+        currentFrame = (currentFrame + 1) % frames.length
+        updateFrame()
+      }
+      setTimeout(animate, 50) // 20 fps
     }
 
     async function getConfig() {
@@ -81,72 +234,71 @@
     }
 
     async function headSize(url) {
-      // HEAD to get Content-Length (works with Express static / MDsrv / typical web servers)
       const res = await fetch(url, { method: 'HEAD' })
       if (!res.ok) return 0
       const len = res.headers.get('content-length')
       return len ? Number(len) : 0
     }
 
-    let loaded = false
-    let cfg = null
-
     async function loadAll() {
-      cfg = await getConfig()
+      const cfg = await getConfig()
       const base = cfg.mdsrvUrl.replace(/\/$/, '')
       const pdbUrl = base + '/data/' + cfg.topology
       const dcdUrl = base + '/data/' + cfg.trajectory
-      mdsrvEl.textContent = base
-      filesEl.textContent = cfg.topology + ' + ' + cfg.trajectory
 
       statusEl.textContent = 'loading structure…'
-      await viewer.loadStructureFromUrl(pdbUrl, 'pdb')
+      const pdbRes = await fetch(pdbUrl)
+      const pdbText = await pdbRes.text()
+      atoms = parsePDB(pdbText)
+      console.log('Loaded atoms:', atoms.length)
+
+      createAtoms()
+
       statusEl.textContent = 'loading trajectory…'
-      // Mol* DCD support via trajectory source; provide model and then attach trajectory
-      const struct = viewer.plugin.managers.structure.hierarchy.selection.structures[0]?.cell?.obj?.data
-      if (!struct) throw new Error('No structure loaded')
+      const dcdRes = await fetch(dcdUrl)
+      const dcdBuffer = await dcdRes.arrayBuffer()
+      console.log('DCD buffer size:', dcdBuffer.byteLength)
+      frames = parseDCD(dcdBuffer)
+      console.log('Loaded frames:', frames.length)
 
-      await viewer.loadTrajectory({
-        kind: 'url',
-        url: dcdUrl,
-        format: 'dcd',
-        model: struct.models[0]
-      })
+      if (frames.length > 0) {
+        currentFrame = 0
+        updateFrame()
+      }
 
-      statusEl.textContent = 'ready'
-      loaded = true
-      if (playing) viewer.plugin.managers.animation.play()
       currentBytes = await headSize(dcdUrl)
+      statusEl.textContent = 'ready'
+      animate()
     }
 
-    async function maybeReloadOnGrowth() {
-      if (!cfg) return
+    async function checkForNewFrames() {
+      const cfg = await getConfig()
       const base = cfg.mdsrvUrl.replace(/\/$/, '')
       const dcdUrl = base + '/data/' + cfg.trajectory
       const size = await headSize(dcdUrl)
-      if (size > currentBytes) {
-        currentBytes = size
-        // naive approach: re-attach trajectory (Mol* will reset the time)
-        statusEl.textContent = 'trajectory grew, reloading…'
-        const struct = viewer.plugin.managers.structure.hierarchy.selection.structures[0]?.cell?.obj?.data
-        await viewer.loadTrajectory({
-          kind: 'url',
-          url: dcdUrl + '?t=' + Date.now(),
-          format: 'dcd',
-          model: struct.models[0]
-        })
-        statusEl.textContent = 'ready'
-      }
-    }
 
-    reloadBtn.onclick = async () => {
-      await maybeReloadOnGrowth()
+      if (size > currentBytes) {
+        const oldFrameCount = frames.length
+        currentBytes = size
+        statusEl.textContent = 'loading new frames…'
+
+        const dcdRes = await fetch(dcdUrl + '?t=' + Date.now())
+        const dcdBuffer = await dcdRes.arrayBuffer()
+        frames = parseDCD(dcdBuffer)
+
+        const newFrameCount = frames.length - oldFrameCount
+        if (newFrameCount > 0) {
+          statusEl.textContent = `loaded ${newFrameCount} new frames`
+          setTimeout(() => statusEl.textContent = 'ready', 2000)
+        } else {
+          statusEl.textContent = 'ready'
+        }
+      }
     }
 
     playPauseBtn.onclick = () => {
       playing = !playing
-      if (playing) viewer.plugin.managers.animation.play()
-      else viewer.plugin.managers.animation.pause()
+      playPauseBtn.textContent = playing ? 'Pause' : 'Play'
     }
 
     togglePollBtn.onclick = () => {
@@ -154,14 +306,14 @@
       togglePollBtn.textContent = polling ? 'Stop Polling' : 'Start Polling'
       if (polling) {
         const secs = Math.max(1, Number(pollSecsInput.value) || 5)
-        pollTimer = setInterval(maybeReloadOnGrowth, secs * 1000)
+        pollTimer = setInterval(checkForNewFrames, secs * 1000)
       } else if (pollTimer) {
         clearInterval(pollTimer)
         pollTimer = null
       }
     }
 
-    initViewer().then(() => loadAll()).catch(err => {
+    loadAll().catch(err => {
       console.error(err)
       statusEl.textContent = 'error: ' + err.message
     })
