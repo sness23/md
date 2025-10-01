@@ -147,9 +147,22 @@
 
         console.log('DCD header:', { magic, nFrames, nAtoms, hdrSize, natSize, offset })
 
-        // Read frames
+        // Read frames - only read frames that actually exist in the buffer
         const parsedFrames = []
-        for (let f = 0; f < nFrames; f++) {
+        const bytesPerFrame = 3 * (8 + nAtoms * 4) // 3 coords * (header + data + footer)
+        const maxPossibleFrames = Math.floor((arrayBuffer.byteLength - offset) / bytesPerFrame)
+        const actualFrames = Math.min(nFrames, maxPossibleFrames)
+
+        console.log('nFrames from header:', nFrames, 'maxPossible:', maxPossibleFrames, 'will read:', actualFrames)
+
+        for (let f = 0; f < actualFrames; f++) {
+          // Check if we have enough bytes left for a complete frame
+          const remainingBytes = arrayBuffer.byteLength - offset
+          if (remainingBytes < bytesPerFrame) {
+            console.warn('Incomplete frame', f, '- stopping parse')
+            break
+          }
+
           const coords = { x: [], y: [], z: [] }
 
           // X coordinates
@@ -320,7 +333,9 @@
       if (frames.length > 1) {
         console.log('Frame 0, atom 0:', frames[0].x[0], frames[0].y[0], frames[0].z[0])
         console.log('Frame 1, atom 0:', frames[1].x[0], frames[1].y[0], frames[1].z[0])
-        console.log('Frame 100, atom 0:', frames[100].x[0], frames[100].y[0], frames[100].z[0])
+        if (frames.length > 100) {
+          console.log('Frame 100, atom 0:', frames[100].x[0], frames[100].y[0], frames[100].z[0])
+        }
       }
 
       if (frames.length > 0) {
