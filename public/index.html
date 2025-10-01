@@ -93,6 +93,43 @@
     engine.runRenderLoop(() => scene.render())
     window.addEventListener('resize', () => engine.resize())
 
+    // WASD + QE camera controls
+    const keys = {}
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true)
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false)
+
+    const moveSpeed = 0.5
+    scene.registerBeforeRender(() => {
+      const forward = camera.target.subtract(camera.position).normalize()
+      const right = BABYLON.Vector3.Cross(forward, camera.upVector).normalize()
+      const up = camera.upVector
+
+      if (keys['w']) {
+        camera.position.addInPlace(forward.scale(moveSpeed))
+        camera.target.addInPlace(forward.scale(moveSpeed))
+      }
+      if (keys['s']) {
+        camera.position.addInPlace(forward.scale(-moveSpeed))
+        camera.target.addInPlace(forward.scale(-moveSpeed))
+      }
+      if (keys['a']) {
+        camera.position.addInPlace(right.scale(-moveSpeed))
+        camera.target.addInPlace(right.scale(-moveSpeed))
+      }
+      if (keys['d']) {
+        camera.position.addInPlace(right.scale(moveSpeed))
+        camera.target.addInPlace(right.scale(moveSpeed))
+      }
+      if (keys['q']) {
+        camera.position.addInPlace(up.scale(-moveSpeed))
+        camera.target.addInPlace(up.scale(-moveSpeed))
+      }
+      if (keys['e']) {
+        camera.position.addInPlace(up.scale(moveSpeed))
+        camera.target.addInPlace(up.scale(moveSpeed))
+      }
+    })
+
     // Parse PDB file
     function parsePDB(text) {
       const lines = text.split('\n')
