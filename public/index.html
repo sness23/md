@@ -102,21 +102,18 @@
     camera.speed = 0.5
     camera.angularSensibility = 2000
 
-    // Pointer lock for Minecraft-style mouse look
+    // Pointer lock for Minecraft-style mouse look (click to enable)
     canvas.addEventListener('click', () => {
-      canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock
-      canvas.requestPointerLock()
+      if (canvas.requestPointerLock) {
+        canvas.requestPointerLock()
+      } else if (canvas.mozRequestPointerLock) {
+        canvas.mozRequestPointerLock()
+      }
     })
 
-    // Auto-focus canvas and grab pointer lock on page load
+    // Auto-focus canvas on page load
     canvas.focus()
-    window.addEventListener('load', () => {
-      canvas.focus()
-      setTimeout(() => {
-        canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock
-        canvas.requestPointerLock()
-      }, 500) // Small delay to ensure page is ready
-    })
+    window.addEventListener('load', () => canvas.focus())
 
     // Camera-attached lights (like PyMOL/ChimeraX)
     const light1 = new BABYLON.DirectionalLight('dirLight', new BABYLON.Vector3(0, 0, 1), scene)
