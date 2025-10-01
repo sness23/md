@@ -1,0 +1,10 @@
+{
+  "step": 7800,
+  "time_ns": 0.0078,
+  "potential_energy": -7218.37,
+  "kinetic_energy": 2983.22,
+  "total_energy": -4235.15,
+  "temperature": 246.26,
+  "num_atoms": 4064,
+  "timestamp": 1759293704.671824
+}
