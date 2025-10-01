@@ -19,6 +19,7 @@
       line-height: 1.6;
       pointer-events: none;
       box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+      display: none;
     }
     #hud-line { color: #0f0; }
     #play-pause {
@@ -35,6 +36,7 @@
       font-size: 16px;
       font-weight: bold;
       box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+      display: none;
     }
     #play-pause:hover { background: rgba(0, 50, 0, 0.9); }
   </style>
@@ -54,11 +56,13 @@
     const frameInfoEl = document.getElementById('frame-info')
     const atomCountEl = document.getElementById('atom-count')
     const playPauseBtn = document.getElementById('play-pause')
+    const hudEl = document.getElementById('hud')
 
     let pollTimer = null
     let currentBytes = 0
     let playing = true
     const pollIntervalSeconds = 5
+    let hudVisible = false
     let currentFrame = 0
     let frames = []
     let atoms = []
@@ -134,9 +138,19 @@
     camera.keysLeft.push(65)  // A
     camera.keysRight.push(68) // D
 
-    // QE for up/down, JIKL; for mouse look
+    // QE for up/down, JIKL; for mouse look, H for HUD toggle
     const keys = {}
-    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true)
+    window.addEventListener('keydown', e => {
+      const key = e.key.toLowerCase()
+      keys[key] = true
+
+      // Toggle HUD with 'h' key
+      if (key === 'h') {
+        hudVisible = !hudVisible
+        hudEl.style.display = hudVisible ? 'block' : 'none'
+        playPauseBtn.style.display = hudVisible ? 'block' : 'none'
+      }
+    })
     window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false)
 
     const lookSpeed = 0.01
