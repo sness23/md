@@ -196,15 +196,44 @@ selected_platform, platform_props = select_platform(args.platform)
 
 # Create simulation
 simulation = app.Simulation(topology, system, integrator, selected_platform, platform_props)
-simulation.context.setPositions(positions)
 
-# Minimize energy
-print(f'[openmm_run_pdb] Minimizing energy...', file=sys.stderr)
-simulation.minimizeEnergy()
+# Check if we should resume from existing trajectory
+resume_from_trajectory = os.path.exists(TRAJ_PATH) and os.path.exists(TOPOLOGY_PATH)
 
-# Write initial topology
-with open(TOPOLOGY_PATH, 'w') as f:
-    app.PDBFile.writeFile(simulation.topology, simulation.context.getState(getPositions=True).getPositions(), f)
+if resume_from_trajectory:
+    print(f'[openmm_run_pdb] Found existing trajectory, resuming...', file=sys.stderr)
+    try:
+        import mdtraj as md
+        traj = md.load(TRAJ_PATH, top=TOPOLOGY_PATH)
+        last_frame = traj[-1]
+        # MDTraj uses nm, OpenMM uses nm for positions (unit.nanometer)
+        last_positions = last_frame.xyz[0] * unit.nanometer
+        simulation.context.setPositions(last_positions)
+
+        # Also restore velocities if available, or re-initialize them
+        try:
+            simulation.context.setVelocitiesToTemperature(temperature)
+            print(f'[openmm_run_pdb] Re-initialized velocities at {args.temperature} K', file=sys.stderr)
+        except:
+            pass
+
+        print(f'[openmm_run_pdb] Loaded last frame from trajectory ({len(traj)} existing frames)', file=sys.stderr)
+    except Exception as e:
+        print(f'[openmm_run_pdb] Failed to load trajectory, starting fresh: {e}', file=sys.stderr)
+        simulation.context.setPositions(positions)
+        simulation.minimizeEnergy()
+        resume_from_trajectory = False
+else:
+    print(f'[openmm_run_pdb] Starting new trajectory...', file=sys.stderr)
+    simulation.context.setPositions(positions)
+    # Minimize energy
+    print(f'[openmm_run_pdb] Minimizing energy...', file=sys.stderr)
+    simulation.minimizeEnergy()
+
+# Write initial topology (or keep existing)
+if not resume_from_trajectory:
+    with open(TOPOLOGY_PATH, 'w') as f:
+        app.PDBFile.writeFile(simulation.topology, simulation.context.getState(getPositions=True).getPositions(), f)
 
 # Use atomic write wrapper for DCD to prevent partial reads
 class AtomicDCDReporter(app.DCDReporter):
@@ -212,6 +241,10 @@ class AtomicDCDReporter(app.DCDReporter):
     def __init__(self, file, reportInterval, append=False, enforcePeriodicBox=None):
         self._temp_file = file + '.tmp'
         self._final_file = file
+        # If appending, copy existing file to temp first
+        if append and os.path.exists(file):
+            import shutil
+            shutil.copy2(file, self._temp_file)
         super().__init__(self._temp_file, reportInterval, append, enforcePeriodicBox)
 
     def report(self, simulation, state):
@@ -223,8 +256,8 @@ class AtomicDCDReporter(app.DCDReporter):
         import shutil
         shutil.copy2(self._temp_file, self._final_file)
 
-# Add reporters
-simulation.reporters.append(AtomicDCDReporter(TRAJ_PATH, args.report_interval))
+# Add reporters (append mode if resuming)
+simulation.reporters.append(AtomicDCDReporter(TRAJ_PATH, args.report_interval, append=resume_from_trajectory))
 simulation.reporters.append(app.StateDataReporter(stdout, args.log_interval, step=True, potentialEnergy=True, temperature=True, speed=True, separator=','))
 
 print(f'[openmm_run_pdb] Configuration:', file=sys.stderr)
