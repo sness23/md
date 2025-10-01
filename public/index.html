@@ -147,9 +147,15 @@
 
         console.log('DCD header:', { magic, nFrames, nAtoms, hdrSize, natSize, offset })
 
+        // Check if DCD has unit cell info (peek at first block size)
+        const firstBlockSize = view.getInt32(offset, true)
+        const hasUnitCell = firstBlockSize === 48 // 48 bytes = 6 doubles for unit cell
+        console.log('First block size:', firstBlockSize, 'hasUnitCell:', hasUnitCell)
+
         // Read frames - only read frames that actually exist in the buffer
         const parsedFrames = []
-        const bytesPerFrame = 3 * (8 + nAtoms * 4) // 3 coords * (header + data + footer)
+        const unitCellBytes = hasUnitCell ? 56 : 0 // 4 (size) + 48 (data) + 4 (size)
+        const bytesPerFrame = unitCellBytes + 3 * (8 + nAtoms * 4) // unit cell + 3 coords * (header + data + footer)
         const maxPossibleFrames = Math.floor((arrayBuffer.byteLength - offset) / bytesPerFrame)
         const actualFrames = Math.min(nFrames, maxPossibleFrames)
 
@@ -163,31 +169,42 @@
             break
           }
 
+          // Skip unit cell data if present
+          if (hasUnitCell) {
+            const cellBlockSize = view.getInt32(offset, true); offset += 4
+            offset += cellBlockSize // Skip the 48 bytes of unit cell data
+            const cellBlockEnd = view.getInt32(offset, true); offset += 4
+          }
+
           const coords = { x: [], y: [], z: [] }
 
           // X coordinates
-          offset += 4 // block size
+          const xBlockSize = view.getInt32(offset, true); offset += 4
+          if (f === 0) console.log('Frame 0 X block size:', xBlockSize, 'expected:', nAtoms * 4)
           for (let i = 0; i < nAtoms; i++) {
             coords.x.push(view.getFloat32(offset, true))
             offset += 4
           }
-          offset += 4 // block size
+          const xBlockEnd = view.getInt32(offset, true); offset += 4
+          if (f === 0 && xBlockSize !== xBlockEnd) {
+            console.warn('X block size mismatch:', xBlockSize, '!=', xBlockEnd)
+          }
 
           // Y coordinates
-          offset += 4
+          const yBlockSize = view.getInt32(offset, true); offset += 4
           for (let i = 0; i < nAtoms; i++) {
             coords.y.push(view.getFloat32(offset, true))
             offset += 4
           }
-          offset += 4
+          const yBlockEnd = view.getInt32(offset, true); offset += 4
 
           // Z coordinates
-          offset += 4
+          const zBlockSize = view.getInt32(offset, true); offset += 4
           for (let i = 0; i < nAtoms; i++) {
             coords.z.push(view.getFloat32(offset, true))
             offset += 4
           }
-          offset += 4
+          const zBlockEnd = view.getInt32(offset, true); offset += 4
 
           parsedFrames.push(coords)
         }
@@ -328,6 +345,13 @@
       console.log('DCD buffer size:', dcdBuffer.byteLength)
       frames = parseDCD(dcdBuffer)
       console.log('Loaded frames:', frames.length)
+
+      // Validate frame data matches atom count
+      if (frames.length > 0 && frames[0].x.length !== atoms.length) {
+        console.error('Atom count mismatch! PDB:', atoms.length, 'DCD frame:', frames[0].x.length)
+        statusEl.textContent = `error: atom count mismatch (PDB: ${atoms.length}, DCD: ${frames[0].x.length})`
+        return
+      }
 
       // Check if frames differ
       if (frames.length > 1) {
