@@ -192,6 +192,19 @@
       atomSpheres.forEach(s => s.dispose())
       atomSpheres = []
 
+      // Calculate center of mass
+      let cx = 0, cy = 0, cz = 0
+      for (const atom of atoms) {
+        cx += atom.x
+        cy += atom.y
+        cz += atom.z
+      }
+      cx /= atoms.length
+      cy /= atoms.length
+      cz /= atoms.length
+
+      console.log('Molecule center:', cx, cy, cz)
+
       for (let i = 0; i < atoms.length; i++) {
         const atom = atoms[i]
         const element = atom.element
@@ -210,6 +223,10 @@
 
         atomSpheres.push(sphere)
       }
+
+      // Center camera on molecule
+      camera.target = new BABYLON.Vector3(cx, cy, cz)
+      camera.radius = Math.max(30, atoms.length * 0.15) // Adjust zoom based on molecule size
 
       atomCountEl.textContent = atoms.length
     }
@@ -327,16 +344,33 @@
         currentBytes = size
         statusEl.textContent = 'loading new frames…'
 
-        const dcdRes = await fetch(dcdUrl + '?t=' + Date.now())
-        const dcdBuffer = await dcdRes.arrayBuffer()
-        frames = parseDCD(dcdBuffer)
+        // Retry logic for partial DCD reads
+        let retries = 3
+        let newFrames = []
+        while (retries > 0) {
+          try {
+            const dcdRes = await fetch(dcdUrl + '?t=' + Date.now())
+            const dcdBuffer = await dcdRes.arrayBuffer()
+            newFrames = parseDCD(dcdBuffer)
+            if (newFrames.length > 0) break
+          } catch (err) {
+            console.warn('DCD parse error, retrying...', err)
+            await new Promise(r => setTimeout(r, 500)) // Wait 500ms before retry
+          }
+          retries--
+        }
 
-        const newFrameCount = frames.length - oldFrameCount
-        if (newFrameCount > 0) {
-          statusEl.textContent = `loaded ${newFrameCount} new frames`
-          setTimeout(() => statusEl.textContent = 'ready', 2000)
+        if (newFrames.length > 0) {
+          frames = newFrames
+          const newFrameCount = frames.length - oldFrameCount
+          if (newFrameCount > 0) {
+            statusEl.textContent = `loaded ${newFrameCount} new frames`
+            setTimeout(() => statusEl.textContent = 'ready', 2000)
+          } else {
+            statusEl.textContent = 'ready'
+          }
         } else {
-          statusEl.textContent = 'ready'
+          statusEl.textContent = 'parse error - will retry next poll'
         }
       }
     }
