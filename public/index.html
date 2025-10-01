@@ -5,56 +5,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Live MD Demo (OpenMM → Babylon.js CPK Viewer)</title>
   <style>
-    html, body { height: 100%; margin: 0; background: #0b1220; color: #e6edf7; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    header { padding: 12px 16px; border-bottom: 1px solid #243042; display: flex; align-items: center; gap: 16px; }
-    main { height: calc(100% - 54px); display: grid; grid-template-columns: 1fr 320px; }
-    #viewer { width: 100%; height: 100%; touch-action: none; }
-    #sidebar { padding: 12px; border-left: 1px solid #243042; overflow: auto; }
-    button { background: #243042; color: #e6edf7; border: none; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
-    button:hover { background: #2d3b50; }
-    input[type=number] { width: 80px; background: #0f172a; color: #e6edf7; border: 1px solid #243042; padding: 4px; border-radius: 4px; }
-    a { color: #9cdcfe; }
-    code { background: #0f172a; padding: 2px 6px; border-radius: 6px; }
+    html, body { height: 100%; margin: 0; background: #000; color: #e6edf7; font-family: 'Courier New', monospace; }
+    #viewer { width: 100%; height: 100%; touch-action: none; display: block; }
+    #hud {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px 20px;
+      border: 2px solid rgba(0, 255, 0, 0.5);
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1.6;
+      pointer-events: none;
+      box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    }
+    #hud-line { color: #0f0; }
+    #play-pause {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #0f0;
+      border: 2px solid rgba(0, 255, 0, 0.5);
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      font-weight: bold;
+      box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    }
+    #play-pause:hover { background: rgba(0, 50, 0, 0.9); }
   </style>
   <!-- Babylon.js from CDN -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
 </head>
 <body>
-  <header>
-    <strong>Live MD Demo</strong>
-    <span>OpenMM → Babylon.js CPK Viewer</span>
-    <span id="status">loading…</span>
-  </header>
-  <main>
-    <canvas id="viewer"></canvas>
-    <div id="sidebar">
-      <h3>Controls</h3>
-      <p>CPK sphere representation. Mouse: rotate (left), pan (right), zoom (wheel).</p>
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <button id="playpause">Pause</button>
-      </div>
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
-        <label>Poll (s) <input id="pollSecs" type="number" value="5" min="1" /></label>
-        <button id="togglePoll">Start Polling</button>
-      </div>
-      <p>Frame: <code id="frame-info">0/0</code></p>
-      <p>Atoms: <code id="atom-count">0</code></p>
-      <hr />
-      <p><small>Live trajectory streaming with Babylon.js</small></p>
-    </div>
-  </main>
+  <canvas id="viewer"></canvas>
+  <div id="hud">
+    <div id="hud-line">STATUS: <span id="status">LOADING...</span></div>
+    <div id="hud-line">FRAME: <span id="frame-info">0/0</span></div>
+    <div id="hud-line">ATOMS: <span id="atom-count">0</span></div>
+  </div>
+  <button id="play-pause">⏸ PAUSE</button>
   <script type="module">
     const statusEl = document.getElementById('status')
     const frameInfoEl = document.getElementById('frame-info')
     const atomCountEl = document.getElementById('atom-count')
-    const playPauseBtn = document.getElementById('playpause')
-    const pollSecsInput = document.getElementById('pollSecs')
-    const togglePollBtn = document.getElementById('togglePoll')
+    const playPauseBtn = document.getElementById('play-pause')
 
-    let polling = false
     let pollTimer = null
     let currentBytes = 0
     let playing = true
+    const pollIntervalSeconds = 5
     let currentFrame = 0
     let frames = []
     let atoms = []
@@ -366,7 +370,7 @@
       const pdbUrl = base + '/data/' + cfg.topology
       const dcdUrl = base + '/data/' + cfg.trajectory
 
-      statusEl.textContent = 'loading structure…'
+      statusEl.textContent = 'LOADING STRUCTURE...'
       const pdbRes = await fetch(pdbUrl)
       const pdbText = await pdbRes.text()
       atoms = parsePDB(pdbText)
@@ -374,7 +378,7 @@
 
       createAtoms()
 
-      statusEl.textContent = 'loading trajectory…'
+      statusEl.textContent = 'LOADING TRAJECTORY...'
       const dcdRes = await fetch(dcdUrl)
       const dcdBuffer = await dcdRes.arrayBuffer()
       console.log('DCD buffer size:', dcdBuffer.byteLength)
@@ -403,8 +407,11 @@
       }
 
       currentBytes = await headSize(dcdUrl)
-      statusEl.textContent = 'ready'
+      statusEl.textContent = 'READY'
       requestAnimationFrame(animate)
+
+      // Auto-start polling
+      pollTimer = setInterval(checkForNewFrames, pollIntervalSeconds * 1000)
     }
 
     async function checkForNewFrames() {
@@ -416,7 +423,7 @@
       if (size > currentBytes) {
         const oldFrameCount = frames.length
         currentBytes = size
-        statusEl.textContent = 'loading new frames…'
+        statusEl.textContent = 'LOADING NEW FRAMES...'
 
         // Retry logic for partial DCD reads
         let retries = 3
@@ -438,37 +445,25 @@
           frames = newFrames
           const newFrameCount = frames.length - oldFrameCount
           if (newFrameCount > 0) {
-            statusEl.textContent = `loaded ${newFrameCount} new frames`
-            setTimeout(() => statusEl.textContent = 'ready', 2000)
+            statusEl.textContent = `+${newFrameCount} FRAMES`
+            setTimeout(() => statusEl.textContent = 'READY', 2000)
           } else {
-            statusEl.textContent = 'ready'
+            statusEl.textContent = 'READY'
           }
         } else {
-          statusEl.textContent = 'parse error - will retry next poll'
+          statusEl.textContent = 'PARSE ERROR'
         }
       }
     }
 
     playPauseBtn.onclick = () => {
       playing = !playing
-      playPauseBtn.textContent = playing ? 'Pause' : 'Play'
-    }
-
-    togglePollBtn.onclick = () => {
-      polling = !polling
-      togglePollBtn.textContent = polling ? 'Stop Polling' : 'Start Polling'
-      if (polling) {
-        const secs = Math.max(1, Number(pollSecsInput.value) || 5)
-        pollTimer = setInterval(checkForNewFrames, secs * 1000)
-      } else if (pollTimer) {
-        clearInterval(pollTimer)
-        pollTimer = null
-      }
+      playPauseBtn.textContent = playing ? '⏸ PAUSE' : '▶ PLAY'
     }
 
     loadAll().catch(err => {
       console.error(err)
-      statusEl.textContent = 'error: ' + err.message
+      statusEl.textContent = 'ERROR: ' + err.message
     })
   </script>
 </body>
