@@ -81,7 +81,15 @@
 
     // Babylon.js setup
     const canvas = document.getElementById('viewer')
-    const engine = new BABYLON.Engine(canvas, true)
+    const engine = new BABYLON.Engine(canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+      disableWebGL2Support: false
+    })
+
+    // Force canvas to native resolution regardless of CSS zoom
+    engine.setHardwareScalingLevel(1 / window.devicePixelRatio)
+
     const scene = new BABYLON.Scene(engine)
     scene.clearColor = new BABYLON.Color3(0.043, 0.071, 0.125)
 
@@ -100,7 +108,10 @@
     light.intensity = 0.8
 
     engine.runRenderLoop(() => scene.render())
-    window.addEventListener('resize', () => engine.resize())
+    window.addEventListener('resize', () => {
+      engine.setHardwareScalingLevel(1 / window.devicePixelRatio)
+      engine.resize()
+    })
 
     // WASD + QE controls (Minecraft-style)
     camera.keysUp.push(87)    // W
